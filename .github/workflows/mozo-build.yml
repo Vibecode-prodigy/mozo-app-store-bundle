@@ -1,0 +1,127 @@
+name: Build & publish to Mozo App Store
+
+# Steps 2-8 of the pipeline:
+#   Lovable syncs to GitHub -> this workflow clones the app, copies it into the
+#   boilerplate, builds it, and uploads the output to the Mozo App Store, which stores it
+#   in the bundle container.
+#
+# Required repository secrets:
+#   MOZO_BUILD_TOKEN  - issued in the developer portal (App -> Bundle -> Build tokens)
+# Optional repository variables:
+#   MOZO_API_BASE_URL - defaults to the production API
+#   LOVABLE_REPOSITORY - owner/name of the Lovable-synced repo, when it is not this one
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      lovable_ref:
+        description: Branch or tag of the Lovable app to build
+        required: false
+        default: main
+
+concurrency:
+  # A newer commit supersedes an in-flight build; publishing them out of order would
+  # leave the store serving the older bundle.
+  group: mozo-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # The template repository has no app to wrap and no build token, so it would fail on
+    # every push. Copies made from the template have a different name and run normally.
+    if: github.repository != 'mozoHospitality/APP-STORE-BOILERPLATE'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out the boilerplate
+        uses: actions/checkout@v4
+
+      # When the Lovable app lives in this repository there is nothing to fetch; when it
+      # is synced to a separate repo, pull it into ./lovable-app.
+      - name: Check out the Lovable app
+        if: vars.LOVABLE_REPOSITORY != ''
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.LOVABLE_REPOSITORY }}
+          ref: ${{ inputs.lovable_ref || 'main' }}
+          token: ${{ secrets.LOVABLE_REPO_TOKEN || github.token }}
+          path: lovable-app
+
+      - name: Use the current repository as the Lovable app
+        if: vars.LOVABLE_REPOSITORY == ''
+        run: |
+          mkdir -p lovable-app
+          # Copy everything except the boilerplate's own directories.
+          rsync -a \
+            --exclude 'lovable-app' \
+            --exclude 'node_modules' \
+            --exclude '.git' \
+            --exclude 'dist' \
+            --exclude 'src' \
+            --exclude 'scripts' \
+            --exclude 'app' \
+            ./ lovable-app/
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Copy the app into the boilerplate
+        run: node scripts/wrap-lovable.mjs --source lovable-app
+
+      # wrap-lovable merges the app's dependencies into package.json, so install after it.
+      # There is no lockfile once dependencies are merged, hence `npm install`.
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Build
+        run: npx vite build
+
+      - name: Emit manifest
+        env:
+          MOZO_SOURCE_REPOSITORY: ${{ github.server_url }}/${{ github.repository }}
+          MOZO_SOURCE_COMMIT: ${{ github.sha }}
+        run: node scripts/emit-manifest.mjs
+
+      - name: Package bundle
+        run: node scripts/package-bundle.mjs
+
+      - name: Upload to the Mozo App Store
+        env:
+          MOZO_BUILD_TOKEN: ${{ secrets.MOZO_BUILD_TOKEN }}
+          MOZO_API_BASE_URL: ${{ vars.MOZO_API_BASE_URL || 'https://apiv2.themozo.app' }}
+        run: |
+          if [ -z "$MOZO_BUILD_TOKEN" ]; then
+            echo "::error::MOZO_BUILD_TOKEN is not set. Issue one in the developer portal and add it as a repository secret."
+            exit 1
+          fi
+
+          http_status=$(curl -sS -o response.json -w '%{http_code}' \
+            -X POST "$MOZO_API_BASE_URL/v4/app-store/app/ci/bundle" \
+            -H "Authorization: Bearer $MOZO_BUILD_TOKEN" \
+            -F "bundle=@bundle.zip;type=application/zip" \
+            -F "repository_url=${{ github.server_url }}/${{ github.repository }}" \
+            -F "commit_sha=${{ github.sha }}")
+
+          echo "Response ($http_status):"
+          cat response.json
+          echo
+
+          if [ "$http_status" -ge 400 ]; then
+            echo "::error::Upload failed with HTTP $http_status"
+            exit 1
+          fi
+
+      - name: Upload build output as an artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mozo-bundle
+          path: |
+            dist/
+            bundle.zip
+          if-no-files-found: warn
+          retention-days: 7

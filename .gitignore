@@ -1,0 +1,9 @@
+node_modules/
+dist/
+bundle.zip
+lovable-app/
+app/src/
+app/entry.generated.ts
+.env
+.env.*
+*.log

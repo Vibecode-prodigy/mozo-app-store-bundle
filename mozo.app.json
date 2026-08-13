@@ -1,0 +1,13 @@
+{
+  "$comment": "App-metadata voor de Mozo App Store. De boilerplate zet dit om naar dist/manifest.json.",
+  "name": "Appèl Kassa Onboarding",
+  "slug": "appel-kassa-onboarding",
+  "version": "1.0.0",
+  "entrypoints": [
+    {
+      "name": "admin-config",
+      "slot": "admin-config"
+    }
+  ],
+  "scopes": ["venue:read"]
+}
