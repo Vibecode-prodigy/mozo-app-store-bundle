@@ -75,7 +75,7 @@ jobs:
       # wrap-lovable merges the app's dependencies into package.json, so install after it.
       # There is no lockfile once dependencies are merged, hence `npm install`.
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: npm install --no-audit --no-fund --legacy-peer-deps
 
       - name: Build
         run: npx vite build
