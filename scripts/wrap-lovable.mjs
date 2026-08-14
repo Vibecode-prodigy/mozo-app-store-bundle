@@ -23,6 +23,71 @@ const APP_SRC_DIR = path.join(APP_DIR, 'src');
 /** Files from the Lovable app that belong to its standalone shell, not to the component. */
 const SHELL_FILES = new Set(['main.tsx', 'main.ts', 'main.jsx', 'main.js', 'vite-env.d.ts']);
 
+/**
+ * Server-only trees. They live in `src/` so TanStack's generated `routeTree.gen.ts`
+ * imports them, but they must not pull Cloudflare/Node runtimes into the client bundle.
+ * Paths are posix, relative to the app `src/` directory.
+ */
+const SERVER_ONLY_PREFIXES = [
+    'lib/mcp',
+    'routes/mcp.ts',
+    'routes/[.mcp]',
+    'routes/[.well-known]',
+    'routes/api',
+    'routes/lovable',
+];
+
+const toPosix = (value) => value.split(path.sep).join('/');
+
+const isServerOnly = (relPosix) =>
+    SERVER_ONLY_PREFIXES.some(
+        (prefix) => relPosix === prefix || relPosix.startsWith(`${prefix}/`)
+    );
+
+const walkFiles = async (dir) => {
+    const entries = await readdir(dir, { withFileTypes: true });
+    const files = [];
+    for (const entry of entries) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) files.push(...(await walkFiles(full)));
+        else files.push(full);
+    }
+    return files;
+};
+
+/**
+ * Keep `routeTree.gen.ts` resolvable, but strip server handlers (MCP, /api/mozo, email)
+ * so Vite never follows `@lovable.dev/mcp-js` or createServerFn into the client bundle.
+ */
+const stubServerOnlyModules = async () => {
+    const files = await walkFiles(APP_SRC_DIR);
+    let stubbed = 0;
+    for (const file of files) {
+        const rel = toPosix(path.relative(APP_SRC_DIR, file));
+        if (!isServerOnly(rel)) continue;
+        if (rel === 'lib/mcp' || rel.startsWith('lib/mcp/')) continue;
+        if (!/\.(tsx|ts|jsx|js)$/.test(file)) continue;
+
+        const original = await readFile(file, 'utf8');
+        const match = original.match(/createFileRoute\(\s*(['"`])([^'"`]+)\1\s*\)/);
+        if (!match) continue;
+
+        await writeFile(
+            file,
+            [
+                '// Stubbed by wrap-lovable.mjs — server-only route, not part of the client bundle.',
+                "import { createFileRoute } from '@tanstack/react-router';",
+                `export const Route = createFileRoute('${match[2]}')({});`,
+                '',
+            ].join('\n')
+        );
+        stubbed += 1;
+    }
+
+    await rm(path.join(APP_SRC_DIR, 'lib', 'mcp'), { recursive: true, force: true });
+    console.log(`wrap-lovable: stubbed ${stubbed} server-only routes; removed lib/mcp`);
+};
+
 /** Candidate root components, most specific first. */
 const ROOT_COMPONENT_CANDIDATES = ['App.tsx', 'App.jsx', 'app.tsx', 'App.ts'];
 
@@ -119,6 +184,8 @@ const main = async () => {
         recursive: true,
         filter: (src) => !SHELL_FILES.has(path.basename(src)),
     });
+
+    await stubServerOnlyModules();
 
     // Lovable apps import their global stylesheet from main.tsx, which we dropped as part
     // of the shell. Re-import it here so Vite still emits it into app.css.

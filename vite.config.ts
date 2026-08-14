@@ -33,6 +33,10 @@ export default defineConfig({
             fileName: () => 'app.js',
         },
         rollupOptions: {
+            // Server-only builtins that deps may still pull in (mcp-js → cloudflare:workers,
+            // sunmi.functions → node:crypto). wrap-lovable stubs those modules out of the
+            // graph; this is the safety net so Rollup does not fail the build.
+            external: ['cloudflare:workers', 'node:crypto'],
             output: {
                 assetFileNames: (assetInfo) =>
                     assetInfo.name?.endsWith('.css') ? 'app.css' : 'assets/[name]-[hash][extname]',
