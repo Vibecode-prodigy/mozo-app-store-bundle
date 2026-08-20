@@ -2,18 +2,18 @@
   "$comment": "App-metadata voor de Mozo App Store. Optie B: eigen dashboard met expliciet gedeclareerde externe backend.",
   "name": "Appèl Kassa Onboarding",
   "slug": "appel-kassa-onboarding",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "entrypoints": [
     {
       "name": "admin-config",
       "slot": "admin-config"
     }
   ],
-  "scopes": ["venue:read", "devices:remote-control"],
+  "scopes": ["devices:remote-control"],
   "external_backend": {
     "declared": true,
     "model": "own-dashboard",
-    "note": "This is not a bridge-only App Store widget. Onboarding data, auth and Sunmi MDM go to our own backend. Host context.api is unused except venue:read for the current venue name."
+    "note": "This is not a bridge-only App Store widget. Onboarding data, auth and Sunmi MDM go to our own backend. Host context.api is unused."
   },
   "external_backends": [
     {

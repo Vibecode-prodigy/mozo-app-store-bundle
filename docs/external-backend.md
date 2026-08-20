@@ -1,6 +1,6 @@
 # Optie B — eigen dashboard in de Mozo App Store
 
-Dit is geen bridge-only app. De bundle rendert het Appèl kassa-onboardingdashboard en praat met onze eigen backend. `context.api` van de host wordt niet gebruikt voor orders/menu/tables/payments.
+Dit is geen bridge-only app. De bundle rendert het Appèl kassa-onboardingdashboard en praat met onze eigen backend. `context.api` van de host wordt niet gebruikt.
 
 ## Externe backends
 
@@ -34,5 +34,4 @@ Verwerkersovereenkomst (VWO) tussen Mozo (verwerkingsverantwoordelijke voor de A
 
 ## Scopes
 
-- `venue:read` — huidige vestigingsnaam uit de host
-- `devices:remote-control` — live scherm van een POS-apparaat. Installatie van de app moet deze scope apart toestaan. In de UI is er een extra bevestiging per sessie. Er zit geen “scherm overnemen”-knop in de installatiechecklist.
+- `devices:remote-control` — live scherm van een POS-apparaat. Installatie van de app moet deze scope apart toestaan. In de UI is er een extra bevestiging per sessie. Er zit geen “scherm overnemen”-knop in de installatiechecklist. Geen Mozo API-scopes (`venue` / menu / orders / tables / payments).
