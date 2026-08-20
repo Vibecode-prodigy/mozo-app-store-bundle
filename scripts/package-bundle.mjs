@@ -42,5 +42,9 @@ archive.on('error', (error) => {
 });
 
 archive.pipe(output);
-archive.directory(DIST_DIR, false);
+archive.glob('**/*', {
+    cwd: DIST_DIR,
+    ignore: ['**/*.map'],
+    dot: false,
+});
 await archive.finalize();

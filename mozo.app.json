@@ -1,13 +1,38 @@
 {
-  "$comment": "App-metadata voor de Mozo App Store. De boilerplate zet dit om naar dist/manifest.json.",
+  "$comment": "App-metadata voor de Mozo App Store. Optie B: eigen dashboard met expliciet gedeclareerde externe backend.",
   "name": "Appèl Kassa Onboarding",
   "slug": "appel-kassa-onboarding",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "entrypoints": [
     {
       "name": "admin-config",
       "slot": "admin-config"
     }
   ],
-  "scopes": ["venue:read"]
+  "scopes": ["venue:read", "devices:remote-control"],
+  "external_backend": {
+    "declared": true,
+    "model": "own-dashboard",
+    "note": "This is not a bridge-only App Store widget. Onboarding data, auth and Sunmi MDM go to our own backend. Host context.api is unused except venue:read for the current venue name."
+  },
+  "external_backends": [
+    {
+      "name": "Appèl Kassa Onboarding API",
+      "origin": "https://mozo-kassa-onboarding-dashboard.lovable.app",
+      "operator": "Mozo / Appèl (Lovable Cloud)",
+      "purpose": "Server functions for Sunmi MDM proxy, user admin, signed file URLs, hardware orders, invite mail."
+    },
+    {
+      "name": "Supabase",
+      "origin": "https://akzxmvhlhhkywqoovkgi.supabase.co",
+      "operator": "Supabase (subprocessor)",
+      "purpose": "Primary database, authentication, and private file storage (menus, checklist photos, device catalog)."
+    },
+    {
+      "name": "Sunmi Open API",
+      "origin": "https://openapi.sunmi.com",
+      "operator": "Sunmi (subprocessor)",
+      "purpose": "POS device inventory, online status, reboot, and live remote view of the device screen."
+    }
+  ]
 }

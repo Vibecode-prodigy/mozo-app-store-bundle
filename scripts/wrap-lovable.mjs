@@ -130,6 +130,26 @@ const findRootComponent = async () => {
 };
 
 /**
+ * The Lovable app's Vite env (VITE_SUPABASE_URL, …) lives next to its package.json,
+ * not in src/. Copy it to the boilerplate root so `vite build` can inline it.
+ */
+const copyEnvFiles = async (fromDir) => {
+    const names = ['.env', '.env.production', '.env.local'];
+    let copied = 0;
+    for (const name of names) {
+        const from = path.join(fromDir, name);
+        if (!existsSync(from)) continue;
+        await cp(from, path.join(ROOT, name));
+        copied += 1;
+    }
+    console.log(
+        copied > 0
+            ? `wrap-lovable: copied ${copied} env file(s) for the client build`
+            : 'wrap-lovable: no .env next to the Lovable app; set VITE_SUPABASE_* in CI'
+    );
+};
+
+/**
  * Merge the Lovable app's runtime dependencies into the boilerplate's package.json so
  * `npm ci` in CI installs everything the app imports. Versions from the app win — it was
  * developed and tested against them.
@@ -186,6 +206,7 @@ const main = async () => {
     });
 
     await stubServerOnlyModules();
+    await copyEnvFiles(sourceDir);
 
     // Lovable apps import their global stylesheet from main.tsx, which we dropped as part
     // of the shell. Re-import it here so Vite still emits it into app.css.

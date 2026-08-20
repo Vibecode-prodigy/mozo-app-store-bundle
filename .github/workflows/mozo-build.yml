@@ -77,8 +77,16 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund --legacy-peer-deps
 
+      # wrap-lovable copies the Lovable repo .env (VITE_SUPABASE_*). Optional secrets
+      # override it when set; leave them unset if the repo .env is the source of truth.
       - name: Build
-        run: npx vite build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          if [ -z "$VITE_SUPABASE_URL" ]; then unset VITE_SUPABASE_URL; fi
+          if [ -z "$VITE_SUPABASE_PUBLISHABLE_KEY" ]; then unset VITE_SUPABASE_PUBLISHABLE_KEY; fi
+          npx vite build
 
       - name: Emit manifest
         env:

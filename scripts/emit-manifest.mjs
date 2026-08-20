@@ -57,6 +57,8 @@ const main = async () => {
             styles,
         })),
         scopes: config.scopes ?? [],
+        external_backend: config.external_backend ?? null,
+        external_backends: config.external_backends ?? [],
         source: {
             // Populated by the GitHub Action; absent for local builds.
             repository: process.env.MOZO_SOURCE_REPOSITORY ?? null,
