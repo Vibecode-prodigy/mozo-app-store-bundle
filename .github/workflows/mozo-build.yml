@@ -94,6 +94,9 @@ jobs:
           MOZO_SOURCE_COMMIT: ${{ github.sha }}
         run: node scripts/emit-manifest.mjs
 
+      - name: Verify the stylesheet compiled
+        run: node scripts/verify-styles.mjs
+
       - name: Package bundle
         run: node scripts/package-bundle.mjs
 

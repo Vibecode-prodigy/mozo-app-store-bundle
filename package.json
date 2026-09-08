@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "wrap": "node scripts/wrap-lovable.mjs",
-    "build": "npm run wrap && vite build && node scripts/emit-manifest.mjs",
+    "build": "npm run wrap && vite build && node scripts/emit-manifest.mjs && node scripts/verify-styles.mjs",
     "package": "node scripts/package-bundle.mjs",
     "dev": "vite",
     "typecheck": "tsc --noEmit"
