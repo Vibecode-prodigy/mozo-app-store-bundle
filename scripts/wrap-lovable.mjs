@@ -187,6 +187,96 @@ const mergeDependencies = async () => {
     console.log('wrap-lovable: merged app dependencies into package.json');
 };
 
+/**
+ * PostCSS / Tailwind config lives next to the Lovable package.json, not in src/.
+ * Copy it to the boilerplate root so `vite build` can expand utilities. Content globs
+ * that pointed at `./src/` are rewritten to `./app/src/` (where wrap copies the app).
+ */
+const STYLE_TOOLING_FILES = [
+    'postcss.config.js',
+    'postcss.config.cjs',
+    'postcss.config.mjs',
+    'postcss.config.ts',
+    'tailwind.config.js',
+    'tailwind.config.cjs',
+    'tailwind.config.mjs',
+    'tailwind.config.ts',
+];
+
+const copyStyleTooling = async () => {
+    let copied = 0;
+    for (const name of STYLE_TOOLING_FILES) {
+        const from = path.join(sourceDir, name);
+        if (!existsSync(from)) continue;
+        let text = await readFile(from, 'utf8');
+        if (name.startsWith('tailwind.config')) {
+            text = text.replaceAll('./src/', './app/src/').replace(/(['"])src\//g, '$1app/src/');
+        }
+        await writeFile(path.join(ROOT, name), text);
+        copied += 1;
+    }
+    console.log(
+        copied > 0
+            ? `wrap-lovable: copied ${copied} CSS tooling file(s) to the build root`
+            : 'wrap-lovable: no PostCSS/Tailwind config in the Lovable app'
+    );
+};
+
+const CSS_FROM_JS = /(?:import\s+['"]([^'"]+\.css)['"]|from\s+['"]([^'"]+\.css)['"])/g;
+const CSS_FROM_HTML = /<link[^>]+href=["']([^"']+\.css)["']/gi;
+const WELL_KNOWN_STYLES = ['index.css', 'globals.css', 'App.css', 'styles.css', 'app.css'];
+
+/** Collect CSS specifiers to re-import from app/entry.ts after dropping the standalone shell. */
+const collectStyleSpecs = async () => {
+    const specs = new Set();
+
+    const addFromAbs = (absPath) => {
+        const rel = toPosix(path.relative(sourceSrcDir, absPath));
+        if (!rel || rel.startsWith('../')) return;
+        specs.add(`./src/${rel}`);
+    };
+
+    const addFromSpec = (spec, importerDir) => {
+        if (spec.startsWith('.')) {
+            addFromAbs(path.resolve(importerDir, spec));
+            return;
+        }
+        if (spec.startsWith('/')) {
+            addFromAbs(path.resolve(sourceDir, spec.slice(1)));
+            return;
+        }
+        specs.add(spec);
+    };
+
+    const scanJs = async (filePath, importerDir) => {
+        if (!existsSync(filePath)) return;
+        const text = await readFile(filePath, 'utf8');
+        for (const match of text.matchAll(CSS_FROM_JS)) {
+            addFromSpec(match[1] || match[2], importerDir);
+        }
+    };
+
+    for (const name of ['main.tsx', 'main.ts', 'main.jsx', 'main.js']) {
+        await scanJs(path.join(sourceSrcDir, name), sourceSrcDir);
+    }
+
+    const indexHtml = path.join(sourceDir, 'index.html');
+    if (existsSync(indexHtml)) {
+        const text = await readFile(indexHtml, 'utf8');
+        for (const match of text.matchAll(CSS_FROM_HTML)) {
+            addFromSpec(match[1], sourceDir);
+        }
+    }
+
+    for (const name of WELL_KNOWN_STYLES) {
+        if (existsSync(path.join(APP_SRC_DIR, name))) {
+            specs.add(`./src/${name}`);
+        }
+    }
+
+    return [...specs];
+};
+
 const main = async () => {
     const rootComponent = await findRootComponent();
     if (!rootComponent) {
@@ -207,13 +297,17 @@ const main = async () => {
 
     await stubServerOnlyModules();
     await copyEnvFiles(sourceDir);
+    await copyStyleTooling();
 
-    // Lovable apps import their global stylesheet from main.tsx, which we dropped as part
-    // of the shell. Re-import it here so Vite still emits it into app.css.
-    const styleImports = ['index.css', 'globals.css', 'App.css']
-        .filter((styleFile) => existsSync(path.join(APP_SRC_DIR, styleFile)))
-        .map((styleFile) => `import './src/${styleFile}';`)
-        .join('\n');
+    // Lovable apps import their global stylesheet from main.tsx / index.html, which we
+    // dropped as part of the shell. Re-import those stylesheets here so Vite emits app.css.
+    const styleSpecs = await collectStyleSpecs();
+    const styleImports = styleSpecs.map((spec) => `import '${spec}';`).join('\n');
+    console.log(
+        styleSpecs.length > 0
+            ? `wrap-lovable: re-imported ${styleSpecs.length} stylesheet(s): ${styleSpecs.join(', ')}`
+            : 'wrap-lovable: no stylesheet found to re-import; the bundle will ship unstyled'
+    );
 
     const componentModule = `./src/${rootComponent.replace(/\.(tsx|ts|jsx|js)$/, '')}`;
 
