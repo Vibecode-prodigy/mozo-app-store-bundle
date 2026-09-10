@@ -150,6 +150,24 @@ const copyEnvFiles = async (fromDir) => {
 };
 
 /**
+ * Standalone-product packages that must not land in the wrap install.
+ * @tanstack/react-start (and friends) require vite>=7; this boilerplate pins
+ * vite@5, so merging them makes `npm install` fail with ERESOLVE.
+ */
+const WRAP_EXCLUDED_PACKAGES = new Set([
+    '@tanstack/react-start',
+    '@tanstack/router-plugin',
+    '@lovable.dev/mcp-js',
+    '@lovable.dev/email-js',
+    '@lovable.dev/webhooks-js',
+    '@lovable.dev/vite-tanstack-config',
+    'nitro',
+]);
+
+const omitWrapExcluded = (deps = {}) =>
+    Object.fromEntries(Object.entries(deps).filter(([name]) => !WRAP_EXCLUDED_PACKAGES.has(name)));
+
+/**
  * Merge the Lovable app's runtime dependencies into the boilerplate's package.json so
  * `npm ci` in CI installs everything the app imports. Versions from the app win — it was
  * developed and tested against them.
@@ -167,15 +185,22 @@ const mergeDependencies = async () => {
         readFile(boilerplatePackagePath, 'utf8').then(JSON.parse),
     ]);
 
+    const appDependencies = omitWrapExcluded(appPackage.dependencies);
+    const appDevDependencies = omitWrapExcluded(appPackage.devDependencies);
+    const omitted = [
+        ...Object.keys(appPackage.dependencies ?? {}),
+        ...Object.keys(appPackage.devDependencies ?? {}),
+    ].filter((name) => WRAP_EXCLUDED_PACKAGES.has(name));
+
     const merged = {
         ...boilerplatePackage,
         dependencies: {
             ...boilerplatePackage.dependencies,
-            ...appPackage.dependencies,
+            ...appDependencies,
         },
         devDependencies: {
             ...boilerplatePackage.devDependencies,
-            ...appPackage.devDependencies,
+            ...appDevDependencies,
             // The boilerplate owns the build toolchain; the app must not downgrade it.
             vite: boilerplatePackage.devDependencies.vite,
             typescript: boilerplatePackage.devDependencies.typescript,
@@ -184,7 +209,11 @@ const mergeDependencies = async () => {
     };
 
     await writeFile(boilerplatePackagePath, `${JSON.stringify(merged, null, 2)}\n`);
-    console.log('wrap-lovable: merged app dependencies into package.json');
+    console.log(
+        omitted.length > 0
+            ? `wrap-lovable: merged app dependencies into package.json (omitted ${omitted.join(', ')})`
+            : 'wrap-lovable: merged app dependencies into package.json',
+    );
 };
 
 /**
