@@ -40,6 +40,20 @@ const listCssFiles = async (dir, rel = '') => {
     return files;
 };
 
+const listJsFiles = async (dir, rel = '') => {
+    const entries = await readdir(dir, { withFileTypes: true });
+    const files = [];
+    for (const entry of entries) {
+        const relative = rel ? `${rel}/${entry.name}` : entry.name;
+        if (entry.isDirectory()) {
+            files.push(...(await listJsFiles(path.join(dir, entry.name), relative)));
+        } else if (entry.name.endsWith('.js') || entry.name.endsWith('.mjs')) {
+            files.push(relative);
+        }
+    }
+    return files;
+};
+
 /** Vite 5 lib mode emits style.css; the host only loads app.css. Rename if needed. */
 const ensureAppCss = async () => {
     const appCssPath = path.join(DIST_DIR, STYLE_FILE);
@@ -131,17 +145,25 @@ const main = async () => {
 
     // Catalog security.host_relative_api fails on quoted "/api/mozo/..." plus
     // any `, window.location.origin)` in the same file (Supabase still has that).
-    const appJsPath = path.join(DIST_DIR, MODULE_FILE);
-    const appJs = await readFile(appJsPath, 'utf8');
     const apiOrigin = 'https://mozo-kassa-onboarding-dashboard.lovable.app';
-    const rewritten = appJs.replace(/(['"`])(\/api\/mozo)/g, `$1${apiOrigin}$2`);
-    if (rewritten !== appJs) {
-        await writeFile(appJsPath, rewritten);
-        console.log('emit-manifest: prefixed host-relative /api/mozo paths with the app HTTPS origin');
+    const jsFiles = await listJsFiles(DIST_DIR);
+    let prefixed = 0;
+    for (const name of jsFiles) {
+        const jsPath = path.join(DIST_DIR, name);
+        const original = await readFile(jsPath, 'utf8');
+        const rewritten = original.replace(/(['"`])(\/api\/mozo)/g, `$1${apiOrigin}$2`);
+        if (rewritten !== original) {
+            await writeFile(jsPath, rewritten);
+            prefixed += 1;
+        }
+        if (rewritten.match(/(['"`])(\/api\/mozo)/g)) {
+            fail(`dist/${name} still contains quoted relative /api/mozo paths`);
+        }
     }
-    const leftover = rewritten.match(/(['"`])(\/api\/mozo)/g);
-    if (leftover) {
-        fail(`dist/${MODULE_FILE} still contains quoted relative /api/mozo paths`);
+    if (prefixed > 0) {
+        console.log(
+            `emit-manifest: prefixed host-relative /api/mozo paths in ${prefixed} JS file(s)`
+        );
     }
 
     const manifest = {

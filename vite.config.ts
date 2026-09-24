@@ -86,6 +86,8 @@ export default defineConfig(async ({ command, mode }) => {
     }
 
     return {
+        // Chunks must resolve next to app.js on the App Store CDN, not on the Mozo host.
+        base: isBuild ? './' : '/',
         plugins,
         resolve: {
             alias: {
@@ -120,26 +122,26 @@ export default defineConfig(async ({ command, mode }) => {
                       target: 'esnext',
                       cssCodeSplit: false,
                       sourcemap: false,
-                      lib: {
-                          entry: resolve(__dirname, 'src/main.tsx'),
-                          formats: ['es'],
-                          fileName: () => 'app.js',
-                      },
+                      // Not lib mode: that wraps mount() in a 200-byte app.js and puts the
+                      // app in assets/main-*.js. Keep exports on app.js; only dynamic
+                      // import() of xlsx/leaflet/react-email may split.
                       rollupOptions: {
+                          input: resolve(__dirname, 'src/main.tsx'),
+                          preserveEntrySignatures: 'strict',
                           // Server-only builtins that deps may still pull in (mcp-js → cloudflare:workers,
                           // sunmi.functions → node:crypto). wrap-lovable stubs those modules out of the
                           // graph; this is the safety net so Rollup does not fail the build.
                           external: ['cloudflare:workers', 'node:crypto'],
                           output: {
+                              format: 'es',
+                              entryFileNames: 'app.js',
                               assetFileNames: (assetInfo) => {
                                   const name = assetInfo.names?.[0] ?? assetInfo.name ?? '';
                                   if (name === 'style' || name.endsWith('.css')) return 'app.css';
                                   return 'assets/[name]-[hash][extname]';
                               },
-                              // A single chunk keeps the manifest's `module` entry the only script the
-                              // host has to load; dynamic imports inside the app still split normally.
                               chunkFileNames: 'assets/[name]-[hash].js',
-                              inlineDynamicImports: true,
+                              inlineDynamicImports: false,
                           },
                       },
                   },
