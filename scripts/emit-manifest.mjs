@@ -9,7 +9,7 @@
  */
 
 import { existsSync } from 'node:fs';
-import { readdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 
@@ -82,6 +82,38 @@ const main = async () => {
             'emit-manifest: no stylesheet in dist/; the host will mount the app unstyled.'
         );
     }
+
+    // Vite lib mode can leave a second stylesheet (app2.css / style.css). The host
+    // only injects app.css; extra sheets still leak into the catalog zip.
+    const leftoverCss = (await listCssFiles(DIST_DIR)).filter((name) => name !== STYLE_FILE);
+    for (const name of leftoverCss) {
+        await rm(path.join(DIST_DIR, name));
+        console.log(`emit-manifest: removed leftover stylesheet dist/${name}`);
+    }
+
+    // Catalog boot-handshake looks for index.html even on module bundles.
+    // The real host uses mount() from app.js; this file is a fallback boot only.
+    const indexHtml = [
+        '<!doctype html>',
+        '<html lang="nl">',
+        '<head>',
+        '  <meta charset="UTF-8" />',
+        '  <meta name="viewport" content="width=device-width, initial-scale=1" />',
+        '  <title>Appèl Kassa Onboarding</title>',
+        '  <link rel="stylesheet" href="./app.css" />',
+        '</head>',
+        '<body>',
+        '  <div id="root"></div>',
+        '  <script type="module">',
+        "    import { mount } from './app.js';",
+        "    const root = document.getElementById('root');",
+        '    if (root) mount(root, globalThis.MozoAppContext ?? { version: 1 });',
+        '  </script>',
+        '</body>',
+        '</html>',
+        '',
+    ].join('\n');
+    await writeFile(path.join(DIST_DIR, 'index.html'), indexHtml);
 
     const manifest = {
         manifest_version: MANIFEST_VERSION,
