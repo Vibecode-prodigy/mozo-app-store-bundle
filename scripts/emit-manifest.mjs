@@ -91,8 +91,15 @@ const main = async () => {
         console.log(`emit-manifest: removed leftover stylesheet dist/${name}`);
     }
 
-    // Catalog boot-handshake looks for index.html even on module bundles.
-    // The real host uses mount() from app.js; this file is a fallback boot only.
+    // Catalog boot-handshake inspects <script src> only (not type=module imports).
+    // Guest View waits 15s for mozo:hello from the official bridge.
+    const bridgePath = path.join(ROOT, 'scripts', 'bridge.js');
+    if (!existsSync(bridgePath)) {
+        fail('scripts/bridge.js not found — the catalog Guest View handshake needs it.');
+    }
+    const bridgeSrc = await readFile(bridgePath, 'utf8');
+    await writeFile(path.join(DIST_DIR, 'bridge.js'), bridgeSrc);
+
     const indexHtml = [
         '<!doctype html>',
         '<html lang="nl">',
@@ -104,16 +111,38 @@ const main = async () => {
         '</head>',
         '<body>',
         '  <div id="root"></div>',
-        '  <script type="module">',
-        "    import { mount } from './app.js';",
-        "    const root = document.getElementById('root');",
-        '    if (root) mount(root, globalThis.MozoAppContext ?? { version: 1 });',
+        '  <script src="./bridge.js"></script>',
+        '  <script>',
+        '    function boot() {',
+        "      import('./app.js').then(function (mod) {",
+        "        var root = document.getElementById('root');",
+        '        if (root && typeof mod.mount === "function") {',
+        '          mod.mount(root, globalThis.MozoAppContext || { version: 1 });',
+        '        }',
+        '      });',
+        '    }',
+        '    MozoApp.bridge.connect().then(boot);',
         '  </script>',
         '</body>',
         '</html>',
         '',
     ].join('\n');
     await writeFile(path.join(DIST_DIR, 'index.html'), indexHtml);
+
+    // Catalog security.host_relative_api fails on quoted "/api/mozo/..." plus
+    // any `, window.location.origin)` in the same file (Supabase still has that).
+    const appJsPath = path.join(DIST_DIR, MODULE_FILE);
+    const appJs = await readFile(appJsPath, 'utf8');
+    const apiOrigin = 'https://mozo-kassa-onboarding-dashboard.lovable.app';
+    const rewritten = appJs.replace(/(['"`])(\/api\/mozo)/g, `$1${apiOrigin}$2`);
+    if (rewritten !== appJs) {
+        await writeFile(appJsPath, rewritten);
+        console.log('emit-manifest: prefixed host-relative /api/mozo paths with the app HTTPS origin');
+    }
+    const leftover = rewritten.match(/(['"`])(\/api\/mozo)/g);
+    if (leftover) {
+        fail(`dist/${MODULE_FILE} still contains quoted relative /api/mozo paths`);
+    }
 
     const manifest = {
         manifest_version: MANIFEST_VERSION,

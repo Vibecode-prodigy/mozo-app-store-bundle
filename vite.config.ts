@@ -56,16 +56,22 @@ function forceAppCss(): Plugin {
  * application and does not provide a React runtime, and two apps mounted side by side
  * must not be forced onto the same React version.
  */
-export default defineConfig(async ({ mode }) => {
-    const env = loadEnv(mode, process.cwd(), '');
+export default defineConfig(async ({ command, mode }) => {
+    const isBuild = command === 'build';
+    // wrap copies .env.production; Vite's development mode would otherwise skip it.
+    const env = {
+        ...loadEnv('production', process.cwd(), ''),
+        ...loadEnv(mode, process.cwd(), ''),
+    };
     const supabaseUrl = env.VITE_SUPABASE_URL || env.SUPABASE_URL || '';
     const supabaseKey = env.VITE_SUPABASE_PUBLISHABLE_KEY || env.SUPABASE_PUBLISHABLE_KEY || '';
 
     if (!supabaseUrl || !supabaseKey) {
-        throw new Error(
-            'VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY must be set for the App Store build. ' +
-            'wrap-lovable copies them from the Lovable repo .env; or set them as GitHub Actions secrets.'
-        );
+        const message =
+            'VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY must be set. ' +
+            'wrap-lovable copies them from the Lovable repo .env; or set them as GitHub Actions secrets.';
+        if (isBuild) throw new Error(message);
+        console.warn(`vite: ${message} Login will fail until they are present.`);
     }
 
     // Tailwind v4 apps ship `@tailwindcss/vite`. v3 apps use PostCSS instead — wrap-lovable
@@ -87,48 +93,73 @@ export default defineConfig(async ({ mode }) => {
                 '@': resolve(__dirname, 'app/src'),
                 '@mozo/app': resolve(__dirname, 'src/main.tsx'),
             },
+            // Wrap installs React 19 from the Lovable app; the restored package.json
+            // still lists 18. Dedupe so Vite never mounts two Reacts in one tree.
+            dedupe: ['react', 'react-dom'],
         },
-        build: {
-            outDir: 'dist',
-            emptyOutDir: true,
-            // Host pages are modern-browser only; keeping esnext avoids shipping helpers
-            // that would be duplicated across every installed app.
-            target: 'esnext',
-            cssCodeSplit: false,
-            sourcemap: false,
-            lib: {
-                entry: resolve(__dirname, 'src/main.tsx'),
-                formats: ['es'],
-                fileName: () => 'app.js',
-            },
-            rollupOptions: {
-                // Server-only builtins that deps may still pull in (mcp-js → cloudflare:workers,
-                // sunmi.functions → node:crypto). wrap-lovable stubs those modules out of the
-                // graph; this is the safety net so Rollup does not fail the build.
-                external: ['cloudflare:workers', 'node:crypto'],
-                output: {
-                    assetFileNames: (assetInfo) => {
-                        const name = assetInfo.names?.[0] ?? assetInfo.name ?? '';
-                        if (name === 'style' || name.endsWith('.css')) return 'app.css';
-                        return 'assets/[name]-[hash][extname]';
-                    },
-                    // A single chunk keeps the manifest's `module` entry the only script the
-                    // host has to load; dynamic imports inside the app still split normally.
-                    chunkFileNames: 'assets/[name]-[hash].js',
-                    inlineDynamicImports: true,
+        server: {
+            port: 5173,
+            strictPort: true,
+            host: true,
+            proxy: {
+                // Local preview talks to the Lovable deploy without CORS.
+                '/api': {
+                    target: 'https://mozo-kassa-onboarding-dashboard.lovable.app',
+                    changeOrigin: true,
+                    secure: true,
                 },
             },
         },
+        ...(isBuild
+            ? {
+                  build: {
+                      outDir: 'dist',
+                      emptyOutDir: true,
+                      // Host pages are modern-browser only; keeping esnext avoids shipping helpers
+                      // that would be duplicated across every installed app.
+                      target: 'esnext',
+                      cssCodeSplit: false,
+                      sourcemap: false,
+                      lib: {
+                          entry: resolve(__dirname, 'src/main.tsx'),
+                          formats: ['es'],
+                          fileName: () => 'app.js',
+                      },
+                      rollupOptions: {
+                          // Server-only builtins that deps may still pull in (mcp-js → cloudflare:workers,
+                          // sunmi.functions → node:crypto). wrap-lovable stubs those modules out of the
+                          // graph; this is the safety net so Rollup does not fail the build.
+                          external: ['cloudflare:workers', 'node:crypto'],
+                          output: {
+                              assetFileNames: (assetInfo) => {
+                                  const name = assetInfo.names?.[0] ?? assetInfo.name ?? '';
+                                  if (name === 'style' || name.endsWith('.css')) return 'app.css';
+                                  return 'assets/[name]-[hash][extname]';
+                              },
+                              // A single chunk keeps the manifest's `module` entry the only script the
+                              // host has to load; dynamic imports inside the app still split normally.
+                              chunkFileNames: 'assets/[name]-[hash].js',
+                              inlineDynamicImports: true,
+                          },
+                      },
+                  },
+              }
+            : {}),
         define: {
             // Lovable apps assume a Vite app shell; without this, libraries that branch on
             // NODE_ENV break when bundled in library mode.
-            'process.env.NODE_ENV': JSON.stringify('production'),
+            'process.env.NODE_ENV': JSON.stringify(isBuild ? 'production' : 'development'),
             // The generated supabase client falls back to process.env.*; without these
             // replacements the browser hits a missing `process` and crashes.
             'process.env.SUPABASE_URL': JSON.stringify(supabaseUrl),
             'process.env.SUPABASE_PUBLISHABLE_KEY': JSON.stringify(supabaseKey),
             'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(supabaseUrl),
             'import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY': JSON.stringify(supabaseKey),
+            // Serve: empty → relative /api via the Vite proxy. Build: own HTTPS origin.
+            // Never window.location.origin — catalog security.host_relative_api fails on that.
+            'import.meta.env.VITE_MOZO_API_BASE': JSON.stringify(
+                isBuild ? 'https://mozo-kassa-onboarding-dashboard.lovable.app' : ''
+            ),
         },
     };
 });
