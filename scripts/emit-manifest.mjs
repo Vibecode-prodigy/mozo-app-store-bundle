@@ -143,26 +143,29 @@ const main = async () => {
     ].join('\n');
     await writeFile(path.join(DIST_DIR, 'index.html'), indexHtml);
 
-    // Catalog security.host_relative_api fails on quoted "/api/mozo/..." plus
-    // any `, window.location.origin)` in the same file (Supabase still has that).
+    // `/api/mozo` is the Mozo host API. This app's backend is `/api/hub` on
+    // the Lovable origin. Catalog Guest View 404s on any remaining /api/mozo.
     const apiOrigin = 'https://mozo-kassa-onboarding-dashboard.lovable.app';
     const jsFiles = await listJsFiles(DIST_DIR);
     let prefixed = 0;
     for (const name of jsFiles) {
         const jsPath = path.join(DIST_DIR, name);
         const original = await readFile(jsPath, 'utf8');
-        const rewritten = original.replace(/(['"`])(\/api\/mozo)/g, `$1${apiOrigin}$2`);
+        if (original.includes('/api/mozo')) {
+            fail(`dist/${name} still contains /api/mozo — use /api/hub on the Lovable origin`);
+        }
+        const rewritten = original.replace(/(['"`])(\/api\/hub)/g, `$1${apiOrigin}$2`);
         if (rewritten !== original) {
             await writeFile(jsPath, rewritten);
             prefixed += 1;
         }
-        if (rewritten.match(/(['"`])(\/api\/mozo)/g)) {
-            fail(`dist/${name} still contains quoted relative /api/mozo paths`);
+        if (rewritten.match(/(['"`])(\/api\/hub)/g)) {
+            fail(`dist/${name} still contains quoted relative /api/hub paths`);
         }
     }
     if (prefixed > 0) {
         console.log(
-            `emit-manifest: prefixed host-relative /api/mozo paths in ${prefixed} JS file(s)`
+            `emit-manifest: prefixed host-relative /api/hub paths in ${prefixed} JS file(s)`
         );
     }
 
