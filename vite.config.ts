@@ -160,7 +160,7 @@ export default defineConfig(async ({ command, mode }) => {
             // Serve: empty → relative /api via the Vite proxy. Build: own HTTPS origin.
             // Never window.location.origin — catalog security.host_relative_api fails on that.
             'import.meta.env.VITE_MOZO_API_BASE': JSON.stringify(
-                isBuild ? 'https://preview--mozo-kassa-onboarding-dashboard.lovable.app' : ''
+                isBuild ? 'https://mozo-kassa-onboarding-dashboard.lovable.app' : ''
             ),
         },
     };

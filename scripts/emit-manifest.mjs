@@ -145,7 +145,7 @@ const main = async () => {
 
     // `/api/mozo` is the Mozo host API. This app's backend is `/api/hub` on
     // the Lovable origin. Catalog Guest View 404s on any remaining /api/mozo.
-    const apiOrigin = 'https://preview--mozo-kassa-onboarding-dashboard.lovable.app';
+    const apiOrigin = 'https://mozo-kassa-onboarding-dashboard.lovable.app';
     const jsFiles = await listJsFiles(DIST_DIR);
     let prefixed = 0;
     for (const name of jsFiles) {
