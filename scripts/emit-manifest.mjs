@@ -75,14 +75,39 @@ const ensureAppCss = async () => {
 };
 
 /**
- * Admin fullpage document for slot admin-config.
+ * Thin ESM wrapper per zip folder. Module hosts import this URL; iframe boots
+ * import it too. Always pins context.slot to the folder name so a misplaced
+ * sidebar element id cannot switch Pipeline → Open items.
+ */
+const folderModuleWrapper = (entryFolder) => `import {
+  mount as baseMount,
+  unmount,
+  onMount,
+  onUnmount,
+  useMozo,
+  useMozoContext,
+} from "../app.js";
+
+var ENTRY = ${JSON.stringify(entryFolder)};
+
+export function mount(element, context) {
+  var pinned = Object.assign({}, context || {}, { slot: ENTRY });
+  return baseMount(element, pinned);
+}
+
+export { unmount, onMount, onUnmount, useMozo, useMozoContext };
+`;
+
+/**
+ * Admin fullpage document for one zip folder.
  * Paint first, then MozoApp.bridge.connect(). Do not touch window.Mozo and do
  * not call basket — a missing basket must not look like a dead host.
+ * `entryFolder` is written to context.slot so the React app pins that feature.
  */
-const iframeDocument = ({ cssHref, moduleSrc }) => {
+const iframeDocument = ({ cssHref, moduleSrc, entryFolder }) => {
     const stylesheet = cssHref ? `    <link rel="stylesheet" href="${cssHref}" />\n` : '';
     const html = `<!doctype html>
-<html lang="nl">
+<html lang="nl" data-mozo-entry="${entryFolder}">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -243,7 +268,7 @@ ${stylesheet}    <style>
               name: "Appèl Kassa Onboarding",
               version: ""
             },
-            slot: "admin-config",
+            slot: ${JSON.stringify(entryFolder)},
             venue: context.venue || { id: "" },
             user: context.user || {},
             scopes: scopes,
@@ -405,18 +430,46 @@ const main = async () => {
     if (!bridgeSrc.includes('function installClient') || bridgeSrc.includes('MozoAppContext')) {
         fail('scripts/bridge.js must be the official hello/init client, not a fake window.Mozo.');
     }
-    await mkdir(path.join(DIST_DIR, 'admin-config'), { recursive: true });
     await writeFile(path.join(DIST_DIR, 'bridge.js'), bridgeSrc);
-    await writeFile(path.join(DIST_DIR, 'admin-config', 'bridge.js'), bridgeSrc);
+
+    const entryFolders = config.entrypoints.map((entrypoint) => {
+        if (!entrypoint?.name || typeof entrypoint.name !== 'string') {
+            fail('each mozo.app.json entrypoint needs a string "name" (zip folder).');
+        }
+        if (!/^[a-z0-9][a-z0-9-]*$/.test(entrypoint.name)) {
+            fail(`entrypoint name "${entrypoint.name}" must be a zip-safe folder slug.`);
+        }
+        return entrypoint.name;
+    });
 
     const cssHrefFor = (prefix) => (styles.length > 0 ? `${prefix}app.css` : '');
+    // Root index.html is a local/fallback boot; placement uses the named folders.
     await writeFile(
         path.join(DIST_DIR, 'index.html'),
-        iframeDocument({ cssHref: cssHrefFor('./'), moduleSrc: './app.js' })
+        iframeDocument({
+            cssHref: cssHrefFor('./'),
+            moduleSrc: './admin-config/app.js',
+            entryFolder: 'admin-config',
+        })
     );
-    await writeFile(
-        path.join(DIST_DIR, 'admin-config', 'index.html'),
-        iframeDocument({ cssHref: cssHrefFor('../'), moduleSrc: '../app.js' })
+    for (const entryFolder of entryFolders) {
+        await mkdir(path.join(DIST_DIR, entryFolder), { recursive: true });
+        await writeFile(path.join(DIST_DIR, entryFolder, 'bridge.js'), bridgeSrc);
+        await writeFile(
+            path.join(DIST_DIR, entryFolder, 'app.js'),
+            folderModuleWrapper(entryFolder)
+        );
+        await writeFile(
+            path.join(DIST_DIR, entryFolder, 'index.html'),
+            iframeDocument({
+                cssHref: cssHrefFor('../'),
+                moduleSrc: './app.js',
+                entryFolder,
+            })
+        );
+    }
+    console.log(
+        `emit-manifest: wrote zip folders ${entryFolders.map((f) => `${f}/`).join(', ')}`
     );
 
     // Own backend lives on the Lovable origin. A relative `/api/mozo` path would
@@ -460,7 +513,8 @@ const main = async () => {
         entrypoints: config.entrypoints.map((entrypoint) => ({
             name: entrypoint.name,
             slot: entrypoint.slot ?? null,
-            module: MODULE_FILE,
+            // Per-folder wrapper pins the feature; root app.js is the shared React module.
+            module: `${entrypoint.name}/${MODULE_FILE}`,
             styles,
         })),
         scopes: config.scopes ?? [],

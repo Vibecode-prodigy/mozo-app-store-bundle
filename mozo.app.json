@@ -1,9 +1,21 @@
 {
-  "$comment": "App-metadata voor de Mozo App Store. Optie B: eigen dashboard met expliciet gedeclareerde externe backend.",
+  "$comment": "App-metadata voor de Mozo App Store. Optie B: eigen dashboard. Entrypoint name = zip folder the placement UI lists. Only admin-config keeps a fixed host slot; sidebar folders use slot null and are assigned in the placement UI.",
   "name": "Appèl Kassa Onboarding",
   "slug": "appel-kassa-onboarding",
-  "version": "1.1.14",
+  "version": "1.1.15",
   "entrypoints": [
+    {
+      "name": "dashboard",
+      "slot": null
+    },
+    {
+      "name": "open-items",
+      "slot": null
+    },
+    {
+      "name": "devices",
+      "slot": null
+    },
     {
       "name": "admin-config",
       "slot": "admin-config"
