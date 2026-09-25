@@ -69,6 +69,8 @@ jobs:
         with:
           node-version: 20
 
+      # wrap-lovable runs scripts/export-app-store-bundle.mjs when the Lovable
+      # app has one, so TanStack Start / vite 8 never land in this vite@5 install.
       - name: Copy the app into the boilerplate
         run: node scripts/wrap-lovable.mjs --source lovable-app
 

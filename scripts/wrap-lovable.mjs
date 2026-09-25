@@ -11,14 +11,16 @@
  * ignore them and mount the root component ourselves.
  */
 
+import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const APP_DIR = path.join(ROOT, 'app');
 const APP_SRC_DIR = path.join(APP_DIR, 'src');
+const APP_SRC_STAGING = path.join(APP_DIR, 'src.__wrap');
 
 /** Files from the Lovable app that belong to its standalone shell, not to the component. */
 const SHELL_FILES = new Set(['main.tsx', 'main.ts', 'main.jsx', 'main.js', 'vite-env.d.ts']);
@@ -44,6 +46,45 @@ const isServerOnly = (relPosix) =>
         (prefix) => relPosix === prefix || relPosix.startsWith(`${prefix}/`)
     );
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const isRetryableFs = (error) => {
+    const code = error && typeof error === 'object' && 'code' in error ? error.code : null;
+    return ['EBUSY', 'EPERM', 'ENOTEMPTY', 'EACCES', 'EEXIST'].includes(code);
+};
+
+/** Vite (and Windows) can hold the live `app/src` tree open; retry instead of leaving a half-copied folder. */
+const rmDirRetry = async (dir) => {
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+        try {
+            await rm(dir, { recursive: true, force: true });
+            return;
+        } catch (error) {
+            if (!isRetryableFs(error) || attempt === 9) throw error;
+            await sleep(150 * (attempt + 1));
+        }
+    }
+};
+
+/** `rename` is not retried by Node; on Windows a just-killed Vite still locks the destination. */
+const swapDirRetry = async (from, to) => {
+    await rmDirRetry(to);
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+        try {
+            await rename(from, to);
+            return;
+        } catch (error) {
+            if (!isRetryableFs(error) || attempt === 9) {
+                await rmDirRetry(to);
+                await cp(from, to, { recursive: true });
+                await rmDirRetry(from);
+                return;
+            }
+            await sleep(200 * (attempt + 1));
+        }
+    }
+};
+
 const walkFiles = async (dir) => {
     const entries = await readdir(dir, { withFileTypes: true });
     const files = [];
@@ -59,11 +100,11 @@ const walkFiles = async (dir) => {
  * Keep `routeTree.gen.ts` resolvable, but strip server handlers (MCP, /api/mozo, email)
  * so Vite never follows `@lovable.dev/mcp-js` or createServerFn into the client bundle.
  */
-const stubServerOnlyModules = async () => {
-    const files = await walkFiles(APP_SRC_DIR);
+const stubServerOnlyModules = async (rootDir = APP_SRC_DIR) => {
+    const files = await walkFiles(rootDir);
     let stubbed = 0;
     for (const file of files) {
-        const rel = toPosix(path.relative(APP_SRC_DIR, file));
+        const rel = toPosix(path.relative(rootDir, file));
         if (!isServerOnly(rel)) continue;
         if (rel === 'lib/mcp' || rel.startsWith('lib/mcp/')) continue;
         if (!/\.(tsx|ts|jsx|js)$/.test(file)) continue;
@@ -84,7 +125,7 @@ const stubServerOnlyModules = async () => {
         stubbed += 1;
     }
 
-    await rm(path.join(APP_SRC_DIR, 'lib', 'mcp'), { recursive: true, force: true });
+    await rm(path.join(rootDir, 'lib', 'mcp'), { recursive: true, force: true });
     console.log(`wrap-lovable: stubbed ${stubbed} server-only routes; removed lib/mcp`);
 };
 
@@ -103,19 +144,44 @@ const parseArgs = () => {
 };
 
 const args = parseArgs();
-const sourceDir = path.resolve(ROOT, args.get('source') ?? 'lovable-app');
+let sourceDir = path.resolve(ROOT, args.get('source') ?? 'lovable-app');
+let sourceSrcDir = sourceDir;
 
-if (!existsSync(sourceDir)) {
-    console.error(
-        `wrap-lovable: source directory not found: ${sourceDir}\n` +
-        `Clone the Lovable GitHub repository there, or pass --source <path>.`
-    );
-    process.exit(1);
-}
+/**
+ * TanStack Start apps ship a client-only exporter so wrap does not merge
+ * `@tanstack/react-start` / vite@8 (this boilerplate pins vite@5).
+ */
+const resolveWrapSource = () => {
+    if (!existsSync(sourceDir)) {
+        console.error(
+            `wrap-lovable: source directory not found: ${sourceDir}\n` +
+                `Clone the Lovable GitHub repository there, or pass --source <path>.`
+        );
+        process.exit(1);
+    }
 
-const sourceSrcDir = existsSync(path.join(sourceDir, 'src'))
-    ? path.join(sourceDir, 'src')
-    : sourceDir;
+    const exportScript = path.join(sourceDir, 'scripts', 'export-app-store-bundle.mjs');
+    if (existsSync(exportScript)) {
+        console.log('wrap-lovable: running export-app-store-bundle.mjs (client graph, no SSR packages)');
+        const result = spawnSync(process.execPath, [exportScript], {
+            cwd: sourceDir,
+            stdio: 'inherit',
+        });
+        if (result.status !== 0) {
+            process.exit(result.status ?? 1);
+        }
+        const exported = path.join(sourceDir, '.app-store-export');
+        if (!existsSync(exported)) {
+            console.error('wrap-lovable: export finished but .app-store-export is missing');
+            process.exit(1);
+        }
+        sourceDir = exported;
+    }
+
+    sourceSrcDir = existsSync(path.join(sourceDir, 'src'))
+        ? path.join(sourceDir, 'src')
+        : sourceDir;
+};
 
 /** Find the app's root component relative to its src directory. */
 const findRootComponent = async () => {
@@ -162,6 +228,10 @@ const WRAP_EXCLUDED_PACKAGES = new Set([
     '@lovable.dev/webhooks-js',
     '@lovable.dev/vite-tanstack-config',
     'nitro',
+    'vite',
+    'vite-tsconfig-paths',
+    '@vitejs/plugin-react',
+    'vitest',
 ]);
 
 const omitWrapExcluded = (deps = {}) =>
@@ -285,7 +355,7 @@ const collectStyleSpecs = async () => {
         }
     };
 
-    for (const name of ['main.tsx', 'main.ts', 'main.jsx', 'main.js']) {
+    for (const name of ['main.tsx', 'main.ts', 'main.jsx', 'main.js', 'App.tsx', 'App.jsx', 'app.tsx']) {
         await scanJs(path.join(sourceSrcDir, name), sourceSrcDir);
     }
 
@@ -306,7 +376,30 @@ const collectStyleSpecs = async () => {
     return [...specs];
 };
 
+/**
+ * Older Tailwind v4 sheets used `@source "../src"` (correct next to `src/styles.css`).
+ * After wrap the file lives at `app/src/styles.css`, so that glob would scan the
+ * boilerplate's `src/` (mount/context only) and the panel would render unstyled.
+ */
+const rewriteTailwindSource = async (rootDir) => {
+    const files = await walkFiles(rootDir);
+    let rewritten = 0;
+    for (const file of files) {
+        if (!file.endsWith('.css')) continue;
+        const original = await readFile(file, 'utf8');
+        const next = original.replace(/@source\s+["']\.\.\/src["']/g, '@source "."');
+        if (next === original) continue;
+        await writeFile(file, next);
+        rewritten += 1;
+    }
+    if (rewritten > 0) {
+        console.log(`wrap-lovable: rewrote Tailwind @source in ${rewritten} stylesheet(s) for the wrapped tree`);
+    }
+};
+
 const main = async () => {
+    resolveWrapSource();
+
     const rootComponent = await findRootComponent();
     if (!rootComponent) {
         console.error(
@@ -316,15 +409,17 @@ const main = async () => {
         process.exit(1);
     }
 
-    await rm(APP_SRC_DIR, { recursive: true, force: true });
-    await mkdir(APP_SRC_DIR, { recursive: true });
-
-    await cp(sourceSrcDir, APP_SRC_DIR, {
+    // Copy into a staging folder, then swap. A live Vite process watching `app/src`
+    // otherwise sees an empty tree mid-copy and fails on every `@/` import.
+    await rmDirRetry(APP_SRC_STAGING);
+    await mkdir(APP_SRC_STAGING, { recursive: true });
+    await cp(sourceSrcDir, APP_SRC_STAGING, {
         recursive: true,
         filter: (src) => !SHELL_FILES.has(path.basename(src)),
     });
-
-    await stubServerOnlyModules();
+    await stubServerOnlyModules(APP_SRC_STAGING);
+    await rewriteTailwindSource(APP_SRC_STAGING);
+    await swapDirRetry(APP_SRC_STAGING, APP_SRC_DIR);
     await copyEnvFiles(sourceDir);
     await copyStyleTooling();
 

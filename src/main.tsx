@@ -35,6 +35,7 @@ export async function mount(element: HTMLElement, rawContext: unknown): Promise<
 
     await runMountHooks(context);
 
+    element.classList.add('kit-app');
     mountedElement = element;
     root = createRoot(element);
     root.render(
@@ -63,7 +64,8 @@ export async function unmount(): Promise<void> {
     }
 
     if (mountedElement) {
-        mountedElement.innerHTML = '';
+        mountedElement.classList.remove('kit-app');
+        mountedElement.replaceChildren();
         mountedElement = null;
     }
 
