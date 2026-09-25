@@ -1,19 +1,19 @@
 {
-  "$comment": "App-metadata voor de Mozo App Store. Optie B: eigen dashboard. Entrypoint name = zip folder the placement UI lists. Only admin-config keeps a fixed host slot; sidebar folders use slot null and are assigned in the placement UI.",
+  "$comment": "App-metadata voor de Mozo App Store. Optie B: eigen dashboard. Entrypoint name = zip folder the placement UI lists (Lovable sidebar labels). Only admin-config keeps a fixed host slot; sidebar folders use slot null and are assigned in the placement UI.",
   "name": "Appèl Kassa Onboarding",
   "slug": "appel-kassa-onboarding",
-  "version": "1.1.15",
+  "version": "1.1.16",
   "entrypoints": [
     {
-      "name": "dashboard",
+      "name": "Pipeline",
       "slot": null
     },
     {
-      "name": "open-items",
+      "name": "Open items",
       "slot": null
     },
     {
-      "name": "devices",
+      "name": "Apparaten",
       "slot": null
     },
     {

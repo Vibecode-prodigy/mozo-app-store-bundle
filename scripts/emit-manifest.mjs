@@ -104,14 +104,24 @@ export { unmount, onMount, onUnmount, useMozo, useMozoContext };
  * not call basket — a missing basket must not look like a dead host.
  * `entryFolder` is written to context.slot so the React app pins that feature.
  */
+/** Page title shown for a zip folder — Lovable sidebar label when known. */
+const pageTitleFor = (entryFolder) => {
+    if (entryFolder === 'Pipeline') return 'Pipeline';
+    if (entryFolder === 'Open items') return 'Open items';
+    if (entryFolder === 'Apparaten') return 'Apparaten';
+    if (entryFolder === 'admin-config') return 'Appèl Kassa Onboarding';
+    return 'Appèl Kassa Onboarding';
+};
+
 const iframeDocument = ({ cssHref, moduleSrc, entryFolder }) => {
     const stylesheet = cssHref ? `    <link rel="stylesheet" href="${cssHref}" />\n` : '';
+    const pageTitle = pageTitleFor(entryFolder);
     const html = `<!doctype html>
 <html lang="nl" data-mozo-entry="${entryFolder}">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Appèl Kassa Onboarding</title>
+    <title>${pageTitle}</title>
 ${stylesheet}    <style>
       /* kit tokens + .kit-* only — no html, body, * */
       .kit-app {
@@ -436,8 +446,10 @@ const main = async () => {
         if (!entrypoint?.name || typeof entrypoint.name !== 'string') {
             fail('each mozo.app.json entrypoint needs a string "name" (zip folder).');
         }
-        if (!/^[a-z0-9][a-z0-9-]*$/.test(entrypoint.name)) {
-            fail(`entrypoint name "${entrypoint.name}" must be a zip-safe folder slug.`);
+        // Lovable sidebar labels (Pipeline, Open items, Apparaten) plus admin-config.
+        // Allow letters, digits, spaces and hyphens — no path separators.
+        if (!/^[A-Za-z0-9][A-Za-z0-9 -]*$/.test(entrypoint.name) || /[\\/]/.test(entrypoint.name)) {
+            fail(`entrypoint name "${entrypoint.name}" must be a zip-safe folder name.`);
         }
         return entrypoint.name;
     });
